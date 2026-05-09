@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { History, Search, Sparkles } from 'lucide-react'
 import AdSlot from '../components/AdSlot.jsx'
 import LoadingCooking from '../components/LoadingCooking.jsx'
+import RecipeSkeleton from '../components/RecipeSkeleton.jsx'
 import { postJson } from '../utils/api.js'
 import { backupRecipes } from '../data/backupRecipes.js'
 import { postSse } from '../utils/sse.js'
@@ -78,6 +79,7 @@ export default function Landing() {
   const [quotaFallback, setQuotaFallback] = useState(false)
   const [recent, setRecent] = useState(() => loadRecentRecipes())
   const [streamText, setStreamText] = useState('')
+  const [earlyRecipeName, setEarlyRecipeName] = useState('')
   const navigate = useNavigate()
 
   const ingredients = useMemo(() => sanitizeIngredients(input), [input])
@@ -91,9 +93,10 @@ export default function Landing() {
     setError('')
     setQuotaFallback(false)
     setStreamText('')
+    setEarlyRecipeName('')
 
     if (ingredients.length < 2 && !force) {
-      setError('Minimal 2 bahan dulu ya. Kalau mau, centang “Tetap kirim”.')
+      setError('Minimal 2 bahan dulu ya. Kalau mau, centang "Tetap kirim".')
       return
     }
 
@@ -104,7 +107,18 @@ export default function Landing() {
         '/api/generate-recipe/stream',
         { ingredients },
         {
-          delta: (p) => setStreamText((t) => t + (p?.text || '')),
+          delta: (p) => {
+            const text = p?.text || ''
+            // Check for early recipe name markers
+            if (text.includes('[RECIPE_NAME_START]') && text.includes('[RECIPE_NAME_END]')) {
+              const recipeName = text.replace(/\[RECIPE_NAME_START\]|\[RECIPE_NAME_END\]/g, '').trim()
+              if (recipeName) {
+                setEarlyRecipeName(recipeName)
+              }
+            } else {
+              setStreamText((t) => t + text)
+            }
+          },
           done: (p) => {
             done = p
           },
@@ -216,14 +230,62 @@ export default function Landing() {
         <AdSlot label="Slot Iklan — di bawah input" />
 
         {loading ? (
-          <div className="space-y-3">
+          <div className="space-y-4">
             <LoadingCooking text="Sedang menyiapkan resep dari bahan kamu…" />
+            {earlyRecipeName ? (
+              <section className="rounded-3xl border border-black/5 bg-gradient-to-r from-[#FF6B35]/5 to-[#2F9E44]/5 p-4 shadow-sm">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="h-2 w-2 rounded-full bg-[#FF6B35] animate-pulse"></div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                    Resep kamu siap!
+                  </p>
+                </div>
+                <h3 className="text-lg font-semibold text-zinc-800 mb-1">
+                  {earlyRecipeName}
+                </h3>
+                <p className="text-xs text-zinc-600">Sedang melengkapkan detail resep...</p>
+              </section>
+            ) : null}
+            <RecipeSkeleton />
+            
+            {/* Pre-computed suggestions while waiting */}
+            <section className="rounded-3xl border border-black/5 bg-white p-5 shadow-sm">
+              <div className="mb-3 flex items-center gap-2">
+                <div className="h-4 w-4 rounded-full bg-[#2F9E44]/10 flex items-center justify-center">
+                  <span className="text-xs">💡</span>
+                </div>
+                <h2 className="text-base font-semibold">Mungkin Kamu Suka</h2>
+              </div>
+              <p className="text-xs text-zinc-600 mb-3">Resep populer yang bisa dicoba sambil menunggu:</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {backupRecipes
+                  .filter((r) => r.kesulitan === 'mudah')
+                  .slice(0, 4)
+                  .map((r) => (
+                    <button
+                      key={`suggest-${r.id}`}
+                      type="button"
+                      onClick={() => {
+                        localStorage.setItem(`recipe:${r.id}`, JSON.stringify(r))
+                        navigate(`/resep/${r.id}`, { state: { recipe: r } })
+                      }}
+                      className="rounded-2xl border border-black/5 bg-zinc-50 p-3 text-left transition-all hover:bg-white hover:shadow-sm active:scale-[0.99]"
+                    >
+                      <p className="text-xs font-semibold">{r.namaResep}</p>
+                      <p className="mt-1 text-[10px] text-zinc-600">
+                        {r.waktuMasakMenit} menit • {r.kesulitan}
+                      </p>
+                    </button>
+                  ))}
+              </div>
+            </section>
+            
             {streamText ? (
               <section className="rounded-3xl border border-black/5 bg-white p-4 text-sm text-zinc-700 shadow-sm">
                 <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
                   Sedang mengetik…
                 </p>
-                <pre className="max-h-52 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">
+                <pre className="max-h-52 overflow-auto whitespace-pre-wrap wrap-break-word font-mono text-xs leading-relaxed">
                   {streamText}
                 </pre>
               </section>

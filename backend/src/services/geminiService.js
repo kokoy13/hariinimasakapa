@@ -80,6 +80,26 @@ function extractJson(text) {
   }
 }
 
+function extractRecipeNameFromPartialText(text) {
+  try {
+    // Look for "nama_resep" field in partial JSON
+    const namaResepMatch = text.match(/"nama_resep"\s*:\s*"([^"]+)"/);
+    if (namaResepMatch && namaResepMatch[1]) {
+      return namaResepMatch[1].trim();
+    }
+    
+    // Alternative: look for "namaResep" field 
+    const namaResepMatch2 = text.match(/"namaResep"\s*:\s*"([^"]+)"/);
+    if (namaResepMatch2 && namaResepMatch2[1]) {
+      return namaResepMatch2[1].trim();
+    }
+    
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function generateRecipeFromIngredients(ingredients) {
   const genAI = new GoogleGenerativeAI(requireApiKey());
   const model = genAI.getGenerativeModel({ model: getModelName() });
@@ -151,11 +171,22 @@ async function streamRecipeFromIngredients(ingredients, onDelta) {
     );
 
     let fullText = '';
+    let recipeNameSent = false;
+    
     for await (const chunk of streamResult.stream) {
       const part = chunk?.text?.() ?? '';
       if (part) {
         fullText += part;
         onDelta(part);
+        
+        // Check if we can extract recipe name early
+        if (!recipeNameSent && fullText.length > 50) {
+          const recipeName = extractRecipeNameFromPartialText(fullText);
+          if (recipeName) {
+            onDelta(`[RECIPE_NAME_START]${recipeName}[RECIPE_NAME_END]`);
+            recipeNameSent = true;
+          }
+        }
       }
     }
 
